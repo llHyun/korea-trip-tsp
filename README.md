@@ -39,10 +39,16 @@
 
 ## 🧰 기술 스택
 
-- Python
-  - 
-  - 
-  - 
+| 항목               | 사용 기술                              |
+|--------------------|----------------------------------------|
+| **Programming Languages** | Python, JavaScript               |
+| **Frameworks**     | FastAPI (백엔드), Next.js (프론트엔드) |
+| **Databases**      | PostgreSQL                            |
+| **Version Control**| Git                                    |
+| **Cloud Services** | AWS                                    |
+| **Deployment Tools**| Docker                                |
+| **Testing Frameworks** | pytest (백엔드), Jest (프론트엔드) |
+| **API**            | RESTful API                           |
 
 ---
 
