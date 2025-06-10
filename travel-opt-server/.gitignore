@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook 체크포인트
+.ipynb_checkpoints
+
+# VSCode 설정
+.vscode/
+
+# 환경 설정
+.env
+
+# OS-specific
+.DS_Store
+
+# Python virtual environment
+venv/
+.env/
