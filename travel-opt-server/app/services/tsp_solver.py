@@ -1,40 +1,35 @@
-import osmnx as ox
-import networkx as nx
 import itertools
+import networkx as nx
+from fastapi import HTTPException
 
-# 주소를 위도/경도로 변환하는 함수
-def geocode_locations(locations):
-    return [ox.geocode(loc) for loc in locations]
 
-# 단순 TSP 순열 계산 (향후 개선 가능)
-def solve_tsp_with_osmnx(start, end, waypoints):
-    all_locations = [start] + waypoints + [end]
-    coords = geocode_locations(all_locations)
+def calc_distance(G, order, node_map):
+    dist = 0
+    for i in range(len(order)-1):
+        try:
+            d = nx.shortest_path_length(G, node_map[order[i]], node_map[order[i+1]], weight="length")
+            dist += d
+        except:
+            dist += 1e9
+    return dist / 1000
 
-    G = ox.graph_from_place("Seoul, South Korea", network_type="drive")
-    node_points = [ox.distance.nearest_nodes(G, lon, lat) for lat, lon in coords]
 
-    # 경로 거리 계산용 인접 행렬 생성
-    def path_length(path):
-        total = 0
-        for i in range(len(path) - 1):
-            try:
-                route = nx.shortest_path_length(G, path[i], path[i+1], weight='length')
-            except:
-                route = float('inf')
-            total += route
-        return total
+def solve_tsp(G, req, day_plan, node_map):
+    result = []
+    for day, places in day_plan.items():
+        w = req.accommodations[day]
+        if req.daily_weights[int(day[3:])-1] == 0:
+            result.append({"date": day, "order": [w.name]})
+            continue
 
-    # 중간 지점 순열 계산
-    best_path = None
-    best_order = None
-    for perm in itertools.permutations(node_points[1:-1]):
-        candidate = [node_points[0]] + list(perm) + [node_points[-1]]
-        if best_path is None or path_length(candidate) < best_path:
-            best_path = path_length(candidate)
-            best_order = candidate
+        start = w.name if w.drop_luggage else req.start
+        mid = places.copy()
+        if w.midday_rest:
+            mid.insert(len(mid)//2, w.name)
 
-    # 다시 주소 순서로 변환
-    final_coords = [ox.distance.nearest_nodes(G, x=G.nodes[n]['x'], y=G.nodes[n]['y'], return_dist=False) for n in best_order]
-    # 이 부분은 실제 주소 역변환 기능 붙이면 개선 가능 (지금은 순서만 반환)
-    return [start] + waypoints + [end]  # 임시: 원래 순서 그대로 리턴
+        routes = list(itertools.permutations(mid))
+        best = min(routes, key=lambda x: calc_distance(G, [start] + list(x) + [w.name], node_map))
+        final = [start] + list(best) + [w.name]
+        result.append({"date": day, "order": final})
+
+    return {"days": result}

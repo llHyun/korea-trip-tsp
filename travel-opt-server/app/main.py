@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.api.v1.routes import optimize
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.graph_loader import get_graph
 
 app = FastAPI()
 
@@ -14,6 +15,9 @@ app.add_middleware(
 
 # 라우터 등록
 app.include_router(optimize.router, prefix="/api/v1/optimize", tags=["Optimize"])
+
+get_graph()  # 서버 시작 시 1회 실행, 그래프 메모리에 고정
+
 
 @app.get("/")
 def root():

@@ -1,0 +1,4 @@
+# 캐시 및 대용량 OSM 데이터 무시
+korea-road-graph.gpickle
+south-korea-latest.osm.pbf
+south-korea.osm.xml
