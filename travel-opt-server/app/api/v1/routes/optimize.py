@@ -17,7 +17,6 @@ router = APIRouter()
 class Accommodation(BaseModel):
     name: str
     drop_luggage: bool
-    midday_rest: bool
 
 class OptimizeRequest(BaseModel):
     start: str
@@ -35,30 +34,34 @@ def optimize_route(req: OptimizeRequest):
 
     intensity = req.daily_weights
     total_weight = sum(intensity)
-    destinations = [d for d in req.destinations if d != req.end]
-    logger.info(f"📌 목적지 {len(destinations)}개 분배 시작 (총 일수: {req.days})")
 
-    # 목적지 분배
+    # 출발점, 도착점 제외하고 목적지 분배
+    destinations = [d for d in req.destinations if d not in [req.start, req.end]]
+    logger.info(f"📌 목적지 {len(destinations)}개 분배 시작 (총 일수: {req.days + 1})")
+
+    # 목적지 개수 일자별 비례 분배
     per_day = {
         f"Day{i+1}": round(len(destinations) * (w / total_weight))
         for i, w in enumerate(intensity)
     }
     leftover = len(destinations) - sum(per_day.values())
     for i in range(abs(leftover)):
-        day = f"Day{(i % req.days)+1}"
-        per_day[day] += 1 if leftover > 0 else -1
+        day = f"Day{(i % (req.days + 1)) + 1}"
+        per_day[f"Day{day}"] += 1 if leftover > 0 else -1
     logger.info(f"📦 일별 목적지 분배 완료: {per_day}")
 
-    # 목적지 순서 분배
-    day_plan = {f"Day{i+1}": [] for i in range(req.days)}
+    # 목적지 배치
+    day_plan = {f"Day{i+1}": [] for i in range(req.days + 1)}
     idx = 0
     for day in day_plan:
         day_plan[day] = destinations[idx:idx+per_day[day]]
         idx += per_day[day]
-    day_plan[f"Day{req.days}"].append(req.end)
+
+    # DayN+1 마지막에 도착지 추가
+    day_plan[f"Day{req.days+1}"].append(req.end)
     logger.info(f"🗓️ 일별 경로 설정 완료: {day_plan}")
 
-    # 지오코딩 및 노드 매핑
+    # 지오코딩
     full_places = set(req.destinations + [req.start, req.end] + [a.name for a in req.accommodations.values()])
     coord_map = {}
     try:
@@ -71,9 +74,11 @@ def optimize_route(req: OptimizeRequest):
 
     logger.info("📍 지오코딩 완료")
 
+    # 노드 매핑
     node_map = {name: ox.distance.nearest_nodes(G, lon, lat) for name, (lat, lon) in coord_map.items()}
     logger.info("🧩 노드 매핑 완료")
 
+    # 최적 경로 계산
     result = solve_tsp(G, req, day_plan, node_map)
     logger.info("🚀 TSP 최적화 완료")
 

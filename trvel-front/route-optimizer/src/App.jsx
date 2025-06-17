@@ -9,10 +9,8 @@ function App() {
   const [days, setDays] = useState(3)
   const [pois, setPois] = useState([])
   const [poiInput, setPoiInput] = useState('')
-  const [dailyWeights, setDailyWeights] = useState(Array(3).fill('중간'))
-  const [accommodations, setAccommodations] = useState(
-    Array(3).fill({ name: '', drop: false, rest: false })
-  )
+  const [dailyWeights, setDailyWeights] = useState(Array(4).fill('중간'))
+  const [accommodations, setAccommodations] = useState(Array(3).fill({ name: '', drop: false }))
   const [result, setResult] = useState([])
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -31,8 +29,8 @@ function App() {
   const handleDaysChange = (e) => {
     const d = parseInt(e.target.value)
     setDays(d)
-    setDailyWeights(Array(d).fill('중간'))
-    setAccommodations(Array(d).fill({ name: '', drop: false, rest: false }))
+    setDailyWeights(Array(d + 1).fill('중간'))
+    setAccommodations(Array(d).fill({ name: '', drop: false }))
   }
 
   const handleSubmit = async (e) => {
@@ -50,7 +48,7 @@ function App() {
         accommodations: Object.fromEntries(
           accommodations.map((a, i) => [
             `Day${i + 1}`,
-            { name: a.name, drop_luggage: a.drop, midday_rest: a.rest }
+            { name: a.name, drop_luggage: a.drop }
           ])
         )
       }
@@ -63,98 +61,106 @@ function App() {
     }
   }
 
+  const formatPlace = (place, day) => {
+    const acc = accommodations[parseInt(day.replace("Day", "")) - 1]
+    if (acc && place === acc.name) return `${place} [숙소]`
+    if (place === start) return `${place} [출발지]`
+    if (place === end) return `${place} [도착지]`
+    return place
+  }
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">대한민국 여행 경로 최적화</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <input className="w-full p-2 border rounded" placeholder="출발지" value={start} onChange={e => setStart(e.target.value)} />
-        <input className="w-full p-2 border rounded" placeholder="도착지 (여행 마지막 목적지)" value={end} onChange={e => setEnd(e.target.value)} />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-100 p-6">
+      <div className="max-w-5xl mx-auto space-y-8">
+        <h1 className="text-4xl font-extrabold text-center text-purple-700">🇰🇷 대한민국 여행 경로 최적화</h1>
 
-        <div>
-          <label className="block font-semibold mb-1">몇 박 며칠?</label>
-          <select value={days} onChange={handleDaysChange} className="p-2 border rounded">
-            {[...Array(7)].map((_, i) => (
-              <option key={i + 1} value={i + 1}>{i + 1}박 {i + 2}일</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block font-semibold">경유지 목록</label>
-          <div className="flex gap-2">
-            <input className="flex-1 p-2 border rounded" placeholder="경유지 입력 후 추가" value={poiInput} onChange={e => setPoiInput(e.target.value)} />
-            <button type="button" onClick={handleAddPoi} className="bg-blue-500 text-white px-3 py-1 rounded">추가</button>
+        <form onSubmit={handleSubmit} className="space-y-6 bg-white shadow-lg rounded-lg p-6">
+          <div className="grid md:grid-cols-2 gap-4">
+            <input className="p-3 border border-gray-300 rounded w-full" placeholder="출발지" value={start} onChange={e => setStart(e.target.value)} />
+            <input className="p-3 border border-gray-300 rounded w-full" placeholder="도착지 (여행 마지막 목적지)" value={end} onChange={e => setEnd(e.target.value)} />
           </div>
-          <ul className="mt-2 list-disc list-inside">
-            {pois.map((p, i) => (
-              <li key={i} className="flex justify-between items-center">
-                {p} <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500">삭제</button>
-              </li>
-            ))}
-          </ul>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {dailyWeights.map((w, i) => (
-            <div key={i}>
-              <label className="block font-semibold mb-1">{i + 1}일차 여행 강도</label>
-              <select value={w} onChange={e => {
-                const newWeights = [...dailyWeights]
-                newWeights[i] = e.target.value
-                setDailyWeights(newWeights)
-              }} className="w-full p-2 border rounded">
-                {dayOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div>
+              <label className="block font-semibold mb-1">몇 박 며칠?</label>
+              <select value={days} onChange={handleDaysChange} className="p-2 border rounded w-full">
+                {[...Array(7)].map((_, i) => (
+                  <option key={i + 1} value={i + 1}>{i + 1}박 {i + 2}일</option>
+                ))}
               </select>
             </div>
-          ))}
-        </div>
-
-        <div className="mt-6 space-y-4">
-          {accommodations.map((a, i) => (
-            <div key={i} className="border p-4 rounded">
-              <h2 className="font-bold mb-2">{i + 1}일차 숙소</h2>
-              <input placeholder="숙소명" className="w-full p-2 border rounded mb-2" value={a.name} onChange={e => {
-                const updated = [...accommodations]
-                updated[i] = { ...updated[i], name: e.target.value }
-                setAccommodations(updated)
-              }} />
-              <div className="flex gap-4">
-                <label><input type="checkbox" checked={a.drop} onChange={e => {
-                  const updated = [...accommodations]
-                  updated[i] = { ...updated[i], drop: e.target.checked }
-                  setAccommodations(updated)
-                }} /> 짐 놓기</label>
-                <label><input type="checkbox" checked={a.rest} onChange={e => {
-                  const updated = [...accommodations]
-                  updated[i] = { ...updated[i], rest: e.target.checked }
-                  setAccommodations(updated)
-                }} /> 중간 휴식</label>
+            {dailyWeights.map((w, i) => (
+              <div key={i}>
+                <label className="block font-semibold mb-1">{i + 1}일차 여행 강도</label>
+                <select value={w} onChange={e => {
+                  const newWeights = [...dailyWeights]
+                  newWeights[i] = e.target.value
+                  setDailyWeights(newWeights)
+                }} className="p-2 border rounded w-full">
+                  {dayOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
               </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded">
+            <label className="block font-semibold mb-2">경유지 목록</label>
+            <div className="flex gap-2">
+              <input className="flex-1 p-2 border rounded" placeholder="경유지 입력 후 추가" value={poiInput} onChange={e => setPoiInput(e.target.value)} />
+              <button type="button" onClick={handleAddPoi} className="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">추가</button>
             </div>
-          ))}
-        </div>
+            <ul className="mt-2 list-disc list-inside text-sm text-gray-700">
+              {pois.map((p, i) => (
+                <li key={i} className="flex justify-between items-center">
+                  {p} <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500">삭제</button>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-        <button type="submit" className="mt-4 bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700" disabled={isLoading}>
-          {isLoading ? '처리 중...' : '경로 최적화 실행'}
-        </button>
-      </form>
+          <div className="grid md:grid-cols-3 gap-4">
+            {accommodations.map((a, i) => (
+              <div key={i} className="bg-purple-50 border border-purple-200 p-4 rounded shadow-sm">
+                <h2 className="font-bold mb-2 text-purple-700">🏨 {i + 1}일차 숙소</h2>
+                <input className="w-full p-2 border rounded mb-2" placeholder="숙소명" value={a.name} onChange={e => {
+                  const updated = [...accommodations]
+                  updated[i] = { ...updated[i], name: e.target.value }
+                  setAccommodations(updated)
+                }} />
+                <label className="block text-sm text-gray-700">
+                  <input type="checkbox" className="mr-2" checked={a.drop} onChange={e => {
+                    const updated = [...accommodations]
+                    updated[i] = { ...updated[i], drop: e.target.checked }
+                    setAccommodations(updated)
+                  }} /> 짐 놓기
+                </label>
+              </div>
+            ))}
+          </div>
 
-      {isLoading && <p className="mt-4 text-blue-500 font-semibold">⏳ 요청 처리 중입니다...</p>}
-      {error && <div className="mt-4 text-red-600 font-semibold">❌ {error}</div>}
+          <button type="submit" className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-lg text-lg font-semibold hover:from-indigo-600 hover:to-purple-700">
+            {isLoading ? '⏳ 처리 중...' : '🚀 경로 최적화 실행'}
+          </button>
+        </form>
 
-      {result.length > 0 && (
-        <div className="mt-6 space-y-4">
-          <h2 className="text-xl font-bold">📍 최적 경로 결과</h2>
-          {result.map((r, i) => (
-            <div key={i} className="border p-3 rounded">
-              <h3 className="font-semibold">{r.date}</h3>
-              <ul className="list-disc list-inside">
-                {r.order.map((place, idx) => <li key={idx}>{place}</li>)}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+        {error && <div className="text-red-600 font-semibold">❌ {error}</div>}
+
+        {result.length > 0 && (
+          <div className="mt-8 space-y-4">
+            <h2 className="text-2xl font-bold text-purple-800">📍 최적 경로 결과</h2>
+            {result.map((r, i) => (
+              <div key={i} className="bg-white shadow p-4 rounded">
+                <h3 className="text-lg font-semibold mb-2 text-indigo-700">{r.date}</h3>
+                <ol className="list-decimal list-inside space-y-1">
+                  {r.order.map((place, idx) => (
+                    <li key={idx}>{formatPlace(place, r.date)}</li>
+                  ))}
+                </ol>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
