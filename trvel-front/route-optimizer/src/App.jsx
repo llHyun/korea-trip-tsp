@@ -55,7 +55,7 @@ function App() {
       const res = await axios.post('http://localhost:8000/api/v1/optimize/', payload)
       setResult(res.data.days)
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || '서버 오류 발생')
+      setError(err.response?.data?.detail || err.message || '서버 오류가 발생했습니다.')
     } finally {
       setIsLoading(false)
     }
@@ -70,11 +70,11 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-100 p-6">
+    <div className="min-h-screen bg-[#f9fafb] text-gray-800 font-sans py-10 px-4">
       <div className="max-w-5xl mx-auto space-y-8">
-        <h1 className="text-4xl font-extrabold text-center text-purple-700">🇰🇷 대한민국 여행 경로 최적화</h1>
+        <h1 className="text-4xl font-bold text-center text-indigo-700">대한민국 여행 경로 최적화</h1>
 
-        <form onSubmit={handleSubmit} className="space-y-6 bg-white shadow-lg rounded-lg p-6">
+        <form onSubmit={handleSubmit} className="space-y-6 bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
           <div className="grid md:grid-cols-2 gap-4">
             <input className="p-3 border border-gray-300 rounded w-full" placeholder="출발지" value={start} onChange={e => setStart(e.target.value)} />
             <input className="p-3 border border-gray-300 rounded w-full" placeholder="도착지 (여행 마지막 목적지)" value={end} onChange={e => setEnd(e.target.value)} />
@@ -82,8 +82,8 @@ function App() {
 
           <div className="grid md:grid-cols-3 gap-4">
             <div>
-              <label className="block font-semibold mb-1">몇 박 며칠?</label>
-              <select value={days} onChange={handleDaysChange} className="p-2 border rounded w-full">
+              <label className="block font-medium mb-1">여행 기간</label>
+              <select value={days} onChange={handleDaysChange} className="p-2 border border-gray-300 rounded w-full">
                 {[...Array(7)].map((_, i) => (
                   <option key={i + 1} value={i + 1}>{i + 1}박 {i + 2}일</option>
                 ))}
@@ -91,28 +91,34 @@ function App() {
             </div>
             {dailyWeights.map((w, i) => (
               <div key={i}>
-                <label className="block font-semibold mb-1">{i + 1}일차 여행 강도</label>
+                <label className="block font-medium mb-1">{i + 1}일차 여행 강도</label>
                 <select value={w} onChange={e => {
                   const newWeights = [...dailyWeights]
                   newWeights[i] = e.target.value
                   setDailyWeights(newWeights)
-                }} className="p-2 border rounded w-full">
+                }} className="p-2 border border-gray-300 rounded w-full">
                   {dayOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
               </div>
             ))}
           </div>
 
-          <div className="bg-gray-50 p-4 rounded">
-            <label className="block font-semibold mb-2">경유지 목록</label>
+          <div className="bg-gray-50 p-4 rounded border border-gray-200">
+            <label className="block font-medium mb-2">경유지 목록</label>
             <div className="flex gap-2">
-              <input className="flex-1 p-2 border rounded" placeholder="경유지 입력 후 추가" value={poiInput} onChange={e => setPoiInput(e.target.value)} />
-              <button type="button" onClick={handleAddPoi} className="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600">추가</button>
+              <input className="flex-1 p-2 border border-gray-300 rounded" placeholder="경유지 입력 후 추가" value={poiInput} onChange={e => setPoiInput(e.target.value)} onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()      // form submit 방지
+                    handleAddPoi()          // 추가 실행
+                  }
+                }}
+              />
+              <button type="button" onClick={handleAddPoi} className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition">추가</button>
             </div>
             <ul className="mt-2 list-disc list-inside text-sm text-gray-700">
               {pois.map((p, i) => (
                 <li key={i} className="flex justify-between items-center">
-                  {p} <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500">삭제</button>
+                  {p} <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500 hover:underline">삭제</button>
                 </li>
               ))}
             </ul>
@@ -120,9 +126,9 @@ function App() {
 
           <div className="grid md:grid-cols-3 gap-4">
             {accommodations.map((a, i) => (
-              <div key={i} className="bg-purple-50 border border-purple-200 p-4 rounded shadow-sm">
-                <h2 className="font-bold mb-2 text-purple-700">🏨 {i + 1}일차 숙소</h2>
-                <input className="w-full p-2 border rounded mb-2" placeholder="숙소명" value={a.name} onChange={e => {
+              <div key={i} className="bg-white border border-gray-200 p-4 rounded">
+                <h2 className="font-semibold mb-2 text-indigo-600">🏨 {i + 1}일차 숙소</h2>
+                <input className="w-full p-2 border border-gray-300 rounded mb-2" placeholder="숙소명" value={a.name} onChange={e => {
                   const updated = [...accommodations]
                   updated[i] = { ...updated[i], name: e.target.value }
                   setAccommodations(updated)
@@ -138,8 +144,8 @@ function App() {
             ))}
           </div>
 
-          <button type="submit" className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-lg text-lg font-semibold hover:from-indigo-600 hover:to-purple-700">
-            {isLoading ? '⏳ 처리 중...' : '🚀 경로 최적화 실행'}
+          <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg text-base font-semibold hover:bg-indigo-700 transition">
+            {isLoading ? '경로 최적화 중...' : '경로 최적화 시작하기'}
           </button>
         </form>
 
@@ -147,11 +153,11 @@ function App() {
 
         {result.length > 0 && (
           <div className="mt-8 space-y-4">
-            <h2 className="text-2xl font-bold text-purple-800">📍 최적 경로 결과</h2>
+            <h2 className="text-2xl font-semibold text-indigo-700">최적 경로 결과</h2>
             {result.map((r, i) => (
-              <div key={i} className="bg-white shadow p-4 rounded">
-                <h3 className="text-lg font-semibold mb-2 text-indigo-700">{r.date}</h3>
-                <ol className="list-decimal list-inside space-y-1">
+              <div key={i} className="bg-white border border-gray-200 p-4 rounded">
+                <h3 className="text-lg font-semibold mb-2 text-gray-800">{r.date}</h3>
+                <ol className="list-decimal list-inside space-y-1 text-sm text-gray-700">
                   {r.order.map((place, idx) => (
                     <li key={idx}>{formatPlace(place, r.date)}</li>
                   ))}
