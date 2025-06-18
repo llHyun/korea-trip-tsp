@@ -28,4 +28,4 @@ cache/
 korea-road-graph.gpickle
 south-korea-latest.osm.pbf
 south-korea.osm.xml
-
+.env

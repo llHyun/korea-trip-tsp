@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict
 import osmnx as ox
-import itertools
 import networkx as nx
 import logging
 
@@ -14,6 +13,11 @@ from app.services.tsp_solver import solve_tsp
 
 router = APIRouter()
 
+class Destination(BaseModel):
+    name: str
+    lat: float
+    lng: float
+
 class Accommodation(BaseModel):
     name: str
     drop_luggage: bool
@@ -22,7 +26,7 @@ class OptimizeRequest(BaseModel):
     start: str
     end: str
     days: int
-    destinations: List[str]
+    destinations: List[Destination]
     daily_weights: List[int]
     accommodations: Dict[str, Accommodation]
 
@@ -36,15 +40,15 @@ def optimize_route(req: OptimizeRequest):
     total_weight = sum(intensity)
 
     # 출발점, 도착점 제외하고 목적지 분배
-    destinations = [d for d in req.destinations if d not in [req.start, req.end]]
-    logger.info(f"📌 목적지 {len(destinations)}개 분배 시작 (총 일수: {req.days + 1})")
+    dest_names = [d.name for d in req.destinations if d.name not in [req.start, req.end]]
+    logger.info(f"📌 목적지 {len(dest_names)}개 분배 시작 (총 일수: {req.days + 1})")
 
     # 목적지 개수 일자별 비례 분배
     per_day = {
-        f"Day{i+1}": round(len(destinations) * (w / total_weight))
+        f"Day{i+1}": round(len(dest_names) * (w / total_weight))
         for i, w in enumerate(intensity)
     }
-    leftover = len(destinations) - sum(per_day.values())
+    leftover = len(dest_names) - sum(per_day.values())
     for i in range(abs(leftover)):
         day = f"Day{(i % (req.days + 1)) + 1}"
         per_day[f"Day{day}"] += 1 if leftover > 0 else -1
@@ -54,28 +58,46 @@ def optimize_route(req: OptimizeRequest):
     day_plan = {f"Day{i+1}": [] for i in range(req.days + 1)}
     idx = 0
     for day in day_plan:
-        day_plan[day] = destinations[idx:idx+per_day[day]]
+        day_plan[day] = dest_names[idx:idx+per_day[day]]
         idx += per_day[day]
 
-    # DayN+1 마지막에 도착지 추가
+    # 마지막 날에 도착지 추가
     day_plan[f"Day{req.days+1}"].append(req.end)
     logger.info(f"🗓️ 일별 경로 설정 완료: {day_plan}")
 
-    # 지오코딩
-    full_places = set(req.destinations + [req.start, req.end] + [a.name for a in req.accommodations.values()])
-    coord_map = {}
+    # 좌표 맵 구성
+    coord_map = {d.name: (d.lat, d.lng) for d in req.destinations}
+
+    # 출발지, 도착지, 숙소는 geocode 사용
     try:
-        for p in full_places:
-            logger.info(f"🧭 지오코딩 중: {p}")
-            coord_map[p] = ox.geocode(p + ", South Korea")
+        if req.start not in coord_map:
+            logger.info(f"🧭 출발지 지오코딩: {req.start}")
+            coord_map[req.start] = ox.geocode(req.start + ", South Korea")
+
+        if req.end not in coord_map:
+            logger.info(f"🧭 도착지 지오코딩: {req.end}")
+            coord_map[req.end] = ox.geocode(req.end + ", South Korea")
+
+        for a in req.accommodations.values():
+            if a.name and a.name not in coord_map:
+                logger.info(f"🛏️ 숙소 지오코딩: {a.name}")
+                coord_map[a.name] = ox.geocode(a.name + ", South Korea")
     except Exception as e:
-        logger.error(f"❌ 지오코딩 실패: {p}")
-        raise HTTPException(status_code=400, detail=f"Geocoding failed: {p}")
+        logger.error(f"❌ 지오코딩 실패: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Geocoding failed: {str(e)}")
 
     logger.info("📍 지오코딩 완료")
 
     # 노드 매핑
-    node_map = {name: ox.distance.nearest_nodes(G, lon, lat) for name, (lat, lon) in coord_map.items()}
+    try:
+        node_map = {
+            name: ox.distance.nearest_nodes(G, lon, lat)
+            for name, (lat, lon) in coord_map.items()
+        }
+    except Exception as e:
+        logger.error(f"❌ 노드 매핑 실패: {str(e)}")
+        raise HTTPException(status_code=400, detail="Node mapping failed.")
+
     logger.info("🧩 노드 매핑 완료")
 
     # 최적 경로 계산

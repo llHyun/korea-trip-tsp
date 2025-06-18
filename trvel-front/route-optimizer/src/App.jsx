@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import axios from 'axios'
+import PlaceSearch from './PlaceSearch'
 
 const dayOptions = ['빡빡', '중간', '널널', '휴식']
 
@@ -7,20 +8,12 @@ function App() {
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
   const [days, setDays] = useState(3)
-  const [pois, setPois] = useState([])
-  const [poiInput, setPoiInput] = useState('')
+  const [pois, setPois] = useState([]) // { name, lat, lng } 구조
   const [dailyWeights, setDailyWeights] = useState(Array(4).fill('중간'))
   const [accommodations, setAccommodations] = useState(Array(3).fill({ name: '', drop: false }))
   const [result, setResult] = useState([])
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
-
-  const handleAddPoi = () => {
-    if (poiInput.trim()) {
-      setPois([...pois, poiInput.trim()])
-      setPoiInput('')
-    }
-  }
 
   const handleRemovePoi = (index) => {
     setPois(pois.filter((_, i) => i !== index))
@@ -33,6 +26,10 @@ function App() {
     setAccommodations(Array(d).fill({ name: '', drop: false }))
   }
 
+  const handlePlaceSelect = (place) => {
+    setPois([...pois, place]) // place = { name, lat, lng }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
@@ -43,7 +40,7 @@ function App() {
         start,
         end,
         days,
-        destinations: pois,
+        destinations: pois.map(p => ({ name: p.name, lat: p.lat, lng: p.lng })),
         daily_weights: dailyWeights.map(w => ({ '빡빡': 3, '중간': 2, '널널': 1, '휴식': 0 })[w]),
         accommodations: Object.fromEntries(
           accommodations.map((a, i) => [
@@ -105,20 +102,12 @@ function App() {
 
           <div className="bg-gray-50 p-4 rounded border border-gray-200">
             <label className="block font-medium mb-2">경유지 목록</label>
-            <div className="flex gap-2">
-              <input className="flex-1 p-2 border border-gray-300 rounded" placeholder="경유지 입력 후 추가" value={poiInput} onChange={e => setPoiInput(e.target.value)} onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()      // form submit 방지
-                    handleAddPoi()          // 추가 실행
-                  }
-                }}
-              />
-              <button type="button" onClick={handleAddPoi} className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition">추가</button>
-            </div>
+            <PlaceSearch onPlaceSelect={handlePlaceSelect} />
             <ul className="mt-2 list-disc list-inside text-sm text-gray-700">
               {pois.map((p, i) => (
                 <li key={i} className="flex justify-between items-center">
-                  {p} <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500 hover:underline">삭제</button>
+                  {p.name} ({p.lat.toFixed(5)}, {p.lng.toFixed(5)}){" "}
+                  <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500 hover:underline">삭제</button>
                 </li>
               ))}
             </ul>
