@@ -7,7 +7,7 @@ const PlaceSearch = ({ onPlaceSelect }) => {
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const KAKAO_API_KEY = import.meta.env.REACT_APP_KAKAO_API_KEY;
+  const KAKAO_API_KEY = import.meta.env.VITE_KAKAO_REST_API_KEY;
 
 
   const searchPlaces = async () => {
@@ -45,6 +45,12 @@ const PlaceSearch = ({ onPlaceSelect }) => {
           value={query}
           placeholder="목적지 입력 (예: 경복궁)"
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              searchPlaces();
+            }
+          }}
           style={{ flex: 1, padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px' }}
         />
         <button

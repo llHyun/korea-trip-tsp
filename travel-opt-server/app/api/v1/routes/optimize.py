@@ -13,22 +13,28 @@ from app.services.tsp_solver import solve_tsp
 
 router = APIRouter()
 
+
 class Destination(BaseModel):
     name: str
     lat: float
     lng: float
 
+
 class Accommodation(BaseModel):
     name: str
+    lat: float
+    lng: float
     drop_luggage: bool
 
+
 class OptimizeRequest(BaseModel):
-    start: str
-    end: str
+    start: Destination
+    end: Destination
     days: int
     destinations: List[Destination]
     daily_weights: List[int]
     accommodations: Dict[str, Accommodation]
+
 
 @router.post("/")
 def optimize_route(req: OptimizeRequest):
@@ -40,7 +46,8 @@ def optimize_route(req: OptimizeRequest):
     total_weight = sum(intensity)
 
     # 출발점, 도착점 제외하고 목적지 분배
-    dest_names = [d.name for d in req.destinations if d.name not in [req.start, req.end]]
+    exclude = [req.start.name, req.end.name]
+    dest_names = [d.name for d in req.destinations if d.name not in exclude]
     logger.info(f"📌 목적지 {len(dest_names)}개 분배 시작 (총 일수: {req.days + 1})")
 
     # 목적지 개수 일자별 비례 분배
@@ -51,42 +58,32 @@ def optimize_route(req: OptimizeRequest):
     leftover = len(dest_names) - sum(per_day.values())
     for i in range(abs(leftover)):
         day = f"Day{(i % (req.days + 1)) + 1}"
-        per_day[f"Day{day}"] += 1 if leftover > 0 else -1
+        if day in per_day:
+            per_day[day] += 1 if leftover > 0 else -1
     logger.info(f"📦 일별 목적지 분배 완료: {per_day}")
 
     # 목적지 배치
     day_plan = {f"Day{i+1}": [] for i in range(req.days + 1)}
     idx = 0
     for day in day_plan:
-        day_plan[day] = dest_names[idx:idx+per_day[day]]
+        day_plan[day] = dest_names[idx:idx + per_day[day]]
         idx += per_day[day]
 
     # 마지막 날에 도착지 추가
-    day_plan[f"Day{req.days+1}"].append(req.end)
+    day_plan[f"Day{req.days+1}"].append(req.end.name)
     logger.info(f"🗓️ 일별 경로 설정 완료: {day_plan}")
 
     # 좌표 맵 구성
-    coord_map = {d.name: (d.lat, d.lng) for d in req.destinations}
+    coord_map = {
+        d.name: (d.lat, d.lng) for d in req.destinations
+    }
+    coord_map[req.start.name] = (req.start.lat, req.start.lng)
+    coord_map[req.end.name] = (req.end.lat, req.end.lng)
+    for accom in req.accommodations.values():
+        if accom.name:
+            coord_map[accom.name] = (accom.lat, accom.lng)
 
-    # 출발지, 도착지, 숙소는 geocode 사용
-    try:
-        if req.start not in coord_map:
-            logger.info(f"🧭 출발지 지오코딩: {req.start}")
-            coord_map[req.start] = ox.geocode(req.start + ", South Korea")
-
-        if req.end not in coord_map:
-            logger.info(f"🧭 도착지 지오코딩: {req.end}")
-            coord_map[req.end] = ox.geocode(req.end + ", South Korea")
-
-        for a in req.accommodations.values():
-            if a.name and a.name not in coord_map:
-                logger.info(f"🛏️ 숙소 지오코딩: {a.name}")
-                coord_map[a.name] = ox.geocode(a.name + ", South Korea")
-    except Exception as e:
-        logger.error(f"❌ 지오코딩 실패: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Geocoding failed: {str(e)}")
-
-    logger.info("📍 지오코딩 완료")
+    logger.info("📍 좌표 맵 구성 완료")
 
     # 노드 매핑
     try:
