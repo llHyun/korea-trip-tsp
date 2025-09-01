@@ -23,13 +23,24 @@ function App() {
     };
 
     const handleDaysChange = (e) => {
-    const d = parseInt(e.target.value);
-    setDays(d);
-    setDailyWeights(Array(d + 1).fill('중간'));
-    setAccommodations(
-        Array.from({ length: d }, () => ({ name: '', lat: null, lng: null, drop: false }))
-    );
-    };
+    const newDays = parseInt(e.target.value);
+    setDays(newDays);
+    setDailyWeights(Array(newDays + 1).fill('중간'));
+
+    setAccommodations(prevAccommodations => {
+        const currentLength = prevAccommodations.length;
+
+        if (newDays > currentLength) {
+            const newEntries = Array(newDays - currentLength).fill({
+                name: '', lat: null, lng: null, drop: false
+            });
+            return [...prevAccommodations, ...newEntries];
+        } else if (newDays < currentLength) {
+            return prevAccommodations.slice(0, newDays);
+        }
+        return prevAccommodations;
+    });
+};
 
 
     const handlePlaceSelect = (place) => {
@@ -242,17 +253,17 @@ function App() {
                                 <ol className="list-decimal list-inside space-y-1 text-sm text-gray-700">
                                     {Array.isArray(r.route)
                                         ? r.route.map((place, idx) => {
-                                              const name =
-                                                  place?.name || '이름없음';
-                                              return (
-                                                  <li key={idx}>
-                                                      {formatPlace(
-                                                          name,
-                                                          r.date
-                                                      )}
-                                                  </li>
-                                              );
-                                          })
+                                            const name =
+                                                place?.name || '이름없음';
+                                            return (
+                                                <li key={idx}>
+                                                    {formatPlace(
+                                                        name,
+                                                        r.date
+                                                    )}
+                                                </li>
+                                            );
+                                        })
                                         : (
                                             <li className="text-red-500">
                                                 ❌ 경로 데이터가 없습니다
