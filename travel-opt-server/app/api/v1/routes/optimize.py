@@ -1,110 +1,262 @@
+import matplotlib
+matplotlib.use('Agg')
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any
 import osmnx as ox
 import networkx as nx
 import logging
+import numpy as np
+import itertools
+from collections import deque
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.metrics.pairwise import euclidean_distances
 
 from app.services.graph_loader import get_graph
 from app.services.tsp_solver import solve_tsp
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
+# --- Pydantic 모델 정의 ---
 
 class Destination(BaseModel):
     name: str
     lat: float
     lng: float
-
+    type: str
 
 class Accommodation(BaseModel):
     name: str
     lat: float
     lng: float
-    drop_luggage: bool
-
 
 class OptimizeRequest(BaseModel):
     start: Destination
     end: Destination
     days: int
     destinations: List[Destination]
-    daily_weights: List[int]
     accommodations: Dict[str, Accommodation]
+    max_spots_per_day: int = Field(..., ge=1, le=5)
+    max_restaurants_per_day: int = Field(..., ge=1, le=3)
+
+class Suggestion(BaseModel):
+    name: str
+    type: str
+    suggestions: List[str]
+
+class OptimizeResponse(BaseModel):
+    days: List[Dict[str, Any]]
+    unplaced_suggestions: List[Suggestion]
 
 
-@router.post("/")
+# --- API 라우트 함수 ---
+
+@router.post("/", response_model=OptimizeResponse)
 def optimize_route(req: OptimizeRequest):
     try:
         logger.info("📍 요청 수신 - optimize_route 시작")
         G = get_graph()
         logger.info("✅ 도로망 그래프 로딩 완료")
 
-        intensity = req.daily_weights
-        total_weight = sum(intensity)
+        num_days = req.days + 1
+        exclude = {req.start.name, req.end.name}
+        
+        # 0. 초기 설정 및 목적지 분류
+        all_valid_destinations = [d for d in req.destinations if d.name not in exclude]
+        tourist_spots = [d for d in all_valid_destinations if d.type == '관광지']
+        restaurants = [d for d in all_valid_destinations if d.type == '식당']
+        logger.info(f"분류: 관광지 {len(tourist_spots)}개, 식당 {len(restaurants)}개")
+        
+        final_day_plan = {f"Day{i+1}": [] for i in range(num_days)}
+        daily_capacity = {f"Day{i+1}": {'spots': req.max_spots_per_day, 'restaurants': req.max_restaurants_per_day} for i in range(num_days)}
+        waiting_list = []
+        unplaced_suggestions = []
+        
+        # 1. 관광지로 뼈대 세우기 및 1차 배정
+        if tourist_spots:
+            coords = np.array([[d.lat, d.lng] for d in tourist_spots])
+            dest_map = { (d.lat, d.lng): d.name for d in tourist_spots }
+            
+            n_samples = len(tourist_spots)
+            k_upper_bound = n_samples - 1
+            max_k_to_test = min(k_upper_bound, num_days)
+            optimal_k = 1
+            if max_k_to_test >= 2:
+                best_k = 2
+                best_score = -1
+                for k in range(2, max_k_to_test + 1):
+                    kmeans = KMeans(n_clusters=k, random_state=42, n_init='auto').fit(coords)
+                    if len(set(kmeans.labels_)) < 2: continue
+                    score = silhouette_score(coords, kmeans.labels_)
+                    if score > best_score: best_score, best_k = score, k
+                optimal_k = best_k
 
-        # 출발점, 도착점 제외하고 목적지 분배
-        exclude = [req.start.name, req.end.name]
-        dest_names = [d.name for d in req.destinations if d.name not in exclude]
-        logger.info(f"📌 목적지 {len(dest_names)}개 분배 시작 (총 일수: {req.days + 1})")
+            logger.info(f"✅ 최적 관광지 그룹 수: {optimal_k}")
+            kmeans = KMeans(n_clusters=optimal_k, random_state=42, n_init='auto').fit(coords)
+            clusters = {i: [] for i in range(optimal_k)}
+            for i, label in enumerate(kmeans.labels_): clusters[label].append(dest_map[tuple(coords[i])])
+            
+            ordered_cluster_indices = list(range(optimal_k))
+            if optimal_k > 1:
+                centroids = kmeans.cluster_centers_
+                start_coord = np.array([[req.start.lat, req.start.lng]])
+                end_coord = np.array([[req.end.lat, req.end.lng]])
+                points = np.vstack([start_coord, centroids, end_coord])
+                dist_matrix = np.linalg.norm(points[:, np.newaxis, :] - points[np.newaxis, :, :], axis=2)
+                min_path_len = float('inf')
+                best_permutation = []
+                num_intermediate_points = len(centroids)
+                base_path = list(range(1, num_intermediate_points + 1))
+                for p in itertools.permutations(base_path):
+                    current_path = [0] + list(p) + [num_intermediate_points + 1]
+                    current_len = sum(dist_matrix[current_path[i], current_path[i+1]] for i in range(len(current_path) - 1))
+                    if current_len < min_path_len:
+                        min_path_len = current_len
+                        best_permutation = list(p)
+                ordered_cluster_indices = [idx - 1 for idx in best_permutation]
 
-        # 목적지 개수 일자별 비례 분배
-        per_day = {
-            f"Day{i+1}": round(len(dest_names) * (w / total_weight))
-            for i, w in enumerate(intensity)
-        }
-        leftover = len(dest_names) - sum(per_day.values())
-        for i in range(abs(leftover)):
-            day = f"Day{(i % (req.days + 1)) + 1}"
-            if day in per_day:
-                per_day[day] += 1 if leftover > 0 else -1
-        logger.info(f"📦 일별 목적지 분배 완료: {per_day}")
+            for i, cluster_idx in enumerate(ordered_cluster_indices):
+                day_key = f"Day{i+1}"
+                spots_for_day = clusters[cluster_idx]
+                centroid = kmeans.cluster_centers_[cluster_idx]
+                spots_for_day.sort(key=lambda name: euclidean_distances(
+                    np.array([[d.lat, d.lng] for d in tourist_spots if d.name == name]), centroid.reshape(1, -1)
+                )[0][0], reverse=True)
+                
+                while len(spots_for_day) > daily_capacity[day_key]['spots']:
+                    waiting_list.append(next(d for d in tourist_spots if d.name == spots_for_day.pop(0)))
+                
+                final_day_plan[day_key].extend(spots_for_day)
+                daily_capacity[day_key]['spots'] -= len(spots_for_day)
+        
+        # --- ✨ 1번 오류 수정: 식당 배치 시 '모든 장소'와의 평균 거리 계산 ---
+        if restaurants:
+            # 1차 배치를 위한 앵커 포인트(좌표 목록) 생성
+            anchor_coords_1st_pass = {}
+            for day, spots in final_day_plan.items():
+                if spots:
+                    anchor_coords_1st_pass[day] = np.array(
+                        [[d.lat, d.lng] for d in tourist_spots if d.name in spots]
+                    )
+            
+            if anchor_coords_1st_pass:
+                for r in restaurants:
+                    r_coord = np.array([[r.lat, r.lng]])
+                    # 각 날짜의 모든 장소와의 평균 거리 계산
+                    avg_distances = {
+                        day: np.mean(euclidean_distances(r_coord, coords_in_day))
+                        for day, coords_in_day in anchor_coords_1st_pass.items()
+                    }
+                    sorted_days = sorted(avg_distances.keys(), key=lambda d: avg_distances[d])
+                    placed = False
+                    for day in sorted_days:
+                        if daily_capacity[day]['restaurants'] > 0:
+                            final_day_plan[day].append(r.name)
+                            daily_capacity[day]['restaurants'] -= 1
+                            placed = True
+                            break
+                    if not placed:
+                        waiting_list.append(r)
+            else: # 관광지가 없는 경우
+                waiting_list.extend(restaurants)
 
-        # 목적지 배치
-        day_plan = {f"Day{i+1}": [] for i in range(req.days + 1)}
-        idx = 0
-        for day in day_plan:
-            day_plan[day] = dest_names[idx:idx + per_day[day]]
-            idx += per_day[day]
+        # 2. 스마트 재배치 (빈 날 활용)
+        empty_days = [day for day, spots in final_day_plan.items() if not spots and day != f"Day{num_days}"]
+        if empty_days and waiting_list:
+            logger.info(f"♻️ 빈 날({empty_days})을 활용한 스마트 재배치 시작")
+            
+            # --- ✨ 2번 오류 수정: 빈 날 숙소 없을 시, 이전 숙소를 거슬러 올라가며 찾기 ---
+            anchor_points_rebalance = {}
+            for day in empty_days:
+                found_accom = None
+                day_num = int(day.replace('Day', ''))
+                
+                # 현재 날짜부터 1일차까지 거슬러 올라가며 가장 최근 숙소 찾기
+                for i in range(day_num, 0, -1):
+                    key = f"Day{i}"
+                    accom = req.accommodations.get(key)
+                    if accom and accom.name:
+                        found_accom = accom
+                        break
+                
+                if found_accom:
+                    anchor_points_rebalance[day] = np.array([[found_accom.lat, found_accom.lng]])
 
-        # 마지막 날에 도착지 추가
-        day_plan[f"Day{req.days+1}"].append(req.end.name)
-        logger.info(f"🗓️ 일별 경로 설정 완료: {day_plan}")
+            if anchor_points_rebalance:
+                waiting_list_q = deque(waiting_list)
+                waiting_list = []
+                while waiting_list_q:
+                    item = waiting_list_q.popleft()
+                    item_coord = np.array([[item.lat, item.lng]])
+                    day_distances = {day: euclidean_distances(item_coord, accom_coord)[0][0] for day, accom_coord in anchor_points_rebalance.items()}
+                    
+                    if not day_distances:
+                        waiting_list.append(item)
+                        continue
 
-        # 좌표 맵 구성
-        coord_map = {
-            d.name: (d.lat, d.lng) for d in req.destinations
-        }
+                    sorted_empty_days = sorted(day_distances.keys(), key=lambda d: day_distances[d])
+                    placed = False
+                    for closest_day in sorted_empty_days:
+                        item_type = 'spots' if item.type == '관광지' else 'restaurants'
+                        if daily_capacity[closest_day][item_type] > 0:
+                            final_day_plan[closest_day].append(item.name)
+                            daily_capacity[closest_day][item_type] -= 1
+                            logger.info(f"   - '{item.name}'을(를) {closest_day}에 재배치 성공")
+                            placed = True
+                            break
+                    if not placed:
+                        waiting_list.append(item)
+
+        # 3. 최종 가이드 생성
+        if waiting_list:
+            logger.info(f"ℹ️ 최종적으로 포함되지 못한 장소 {len(waiting_list)}개에 대한 가이드 생성")
+            
+            final_day_anchors = {}
+            for day, items in final_day_plan.items():
+                items_without_end = [i for i in items if i != req.end.name]
+                if items_without_end:
+                    coords_in_day = np.array([[d.lat, d.lng] for d in all_valid_destinations if d.name in items_without_end])
+                    if coords_in_day.size > 0:
+                         final_day_anchors[day] = coords_in_day
+
+            if final_day_anchors:
+                for item in waiting_list:
+                    item_coord = np.array([[item.lat, item.lng]])
+                    avg_distances = {
+                        day: np.mean(euclidean_distances(item_coord, coords_in_day))
+                        for day, coords_in_day in final_day_anchors.items()
+                    }
+                    sorted_days = sorted(avg_distances.keys(), key=lambda d: avg_distances[d])
+                    suggestions = sorted_days[:2] if len(sorted_days) > 1 else sorted_days
+                    unplaced_suggestions.append(Suggestion(name=item.name, type=item.type, suggestions=[d.replace('Day', '일차') for d in suggestions]))
+        
+        # 4. 최종 경로 계산
+        final_day_plan[f"Day{num_days}"].append(req.end.name)
+        
+        coord_map = {d.name: (d.lat, d.lng) for d in all_valid_destinations}
         coord_map[req.start.name] = (req.start.lat, req.start.lng)
         coord_map[req.end.name] = (req.end.lat, req.end.lng)
         for accom in req.accommodations.values():
-            if accom.name:
+            if accom and accom.name:
                 coord_map[accom.name] = (accom.lat, accom.lng)
-
-        logger.info("📍 좌표 맵 구성 완료")
-
-        # 노드 매핑
         try:
-            node_map = {
-                name: ox.distance.nearest_nodes(G, lon, lat)
-                for name, (lat, lon) in coord_map.items()
-            }
+            node_map = {name: ox.distance.nearest_nodes(G, lon, lat) for name, (lat, lon) in coord_map.items() if name}
         except Exception as e:
             logger.error(f"❌ 노드 매핑 실패: {str(e)}")
             raise HTTPException(status_code=400, detail="Node mapping failed.")
+        logger.info("🧩 최종 노드 매핑 완료")
 
-        logger.info("🧩 노드 매핑 완료")
+        tsp_result = solve_tsp(G, req, final_day_plan, node_map)
+        
+        return OptimizeResponse(days=tsp_result['days'], unplaced_suggestions=unplaced_suggestions)
 
-        # 최적 경로 계산
-        result = solve_tsp(G, req, day_plan, node_map)
-        logger.info("🚀 TSP 최적화 완료")
-
-        return result
     except Exception as e:
-            # 오류가 발생하면 터미널에 오류 메시지를 명확히 출력합니다.
-            print(f"오류 발생: {e}")
-            # 클라이언트에게도 오류 메시지를 전달합니다.
-            raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"💥 서버 오류 발생: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+

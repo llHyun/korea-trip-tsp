@@ -59,7 +59,7 @@ def solve_tsp(G, req, day_plan, node_map):
             result.append({"date": day, "route": route})
             continue
 
-        if req.daily_weights[day_index - 1] == 0:
+        if not places:
             w = req.accommodations[day]
             result.append({
                 "date": day,
@@ -73,7 +73,7 @@ def solve_tsp(G, req, day_plan, node_map):
         else:
             prev_day = f"Day{day_index - 1}"
             prev_accom = req.accommodations.get(prev_day)
-            start = w.name if w.drop_luggage else (prev_accom.name if prev_accom else req.start.name)
+            start = prev_accom.name if prev_accom and prev_accom.name else req.start.name
 
         mid = places.copy()
         routes = list(itertools.permutations(mid))
