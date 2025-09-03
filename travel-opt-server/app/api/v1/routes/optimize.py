@@ -44,6 +44,7 @@ class OptimizeRequest(BaseModel):
     accommodations: Dict[str, Accommodation]
     max_spots_per_day: int = Field(..., ge=1, le=5)
     max_restaurants_per_day: int = Field(..., ge=1, le=3)
+    include_last_day: bool = True
 
 class Suggestion(BaseModel):
     name: str
@@ -77,6 +78,11 @@ def optimize_route(req: OptimizeRequest):
         daily_capacity = {f"Day{i+1}": {'spots': req.max_spots_per_day, 'restaurants': req.max_restaurants_per_day} for i in range(num_days)}
         waiting_list = []
         unplaced_suggestions = []
+        
+        if not req.include_last_day:
+            last_day_key = f"Day{num_days}"
+            daily_capacity[last_day_key] = {'spots': 0, 'restaurants': 0}
+            logger.info(f"ℹ️ 마지막 날({last_day_key})은 일정에 포함되지 않도록 설정되었습니다.")
         
         # 1. 관광지로 뼈대 세우기 및 1차 배정
         if tourist_spots:
@@ -123,6 +129,11 @@ def optimize_route(req: OptimizeRequest):
 
             for i, cluster_idx in enumerate(ordered_cluster_indices):
                 day_key = f"Day{i+1}"
+                # 마지막 날 용량이 0이면 배정하지 않음
+                if daily_capacity[day_key]['spots'] == 0:
+                    waiting_list.extend([d for d in tourist_spots if d.name in clusters[cluster_idx]])
+                    continue
+                
                 spots_for_day = clusters[cluster_idx]
                 centroid = kmeans.cluster_centers_[cluster_idx]
                 spots_for_day.sort(key=lambda name: euclidean_distances(
@@ -135,9 +146,7 @@ def optimize_route(req: OptimizeRequest):
                 final_day_plan[day_key].extend(spots_for_day)
                 daily_capacity[day_key]['spots'] -= len(spots_for_day)
         
-        # --- ✨ 1번 오류 수정: 식당 배치 시 '모든 장소'와의 평균 거리 계산 ---
         if restaurants:
-            # 1차 배치를 위한 앵커 포인트(좌표 목록) 생성
             anchor_coords_1st_pass = {}
             for day, spots in final_day_plan.items():
                 if spots:
@@ -148,7 +157,6 @@ def optimize_route(req: OptimizeRequest):
             if anchor_coords_1st_pass:
                 for r in restaurants:
                     r_coord = np.array([[r.lat, r.lng]])
-                    # 각 날짜의 모든 장소와의 평균 거리 계산
                     avg_distances = {
                         day: np.mean(euclidean_distances(r_coord, coords_in_day))
                         for day, coords_in_day in anchor_coords_1st_pass.items()
@@ -163,28 +171,28 @@ def optimize_route(req: OptimizeRequest):
                             break
                     if not placed:
                         waiting_list.append(r)
-            else: # 관광지가 없는 경우
+            else:
                 waiting_list.extend(restaurants)
 
         # 2. 스마트 재배치 (빈 날 활용)
-        empty_days = [day for day, spots in final_day_plan.items() if not spots and day != f"Day{num_days}"]
+        empty_days = [day for day, spots in final_day_plan.items() if not spots]
         if empty_days and waiting_list:
             logger.info(f"♻️ 빈 날({empty_days})을 활용한 스마트 재배치 시작")
             
-            # --- ✨ 2번 오류 수정: 빈 날 숙소 없을 시, 이전 숙소를 거슬러 올라가며 찾기 ---
             anchor_points_rebalance = {}
             for day in empty_days:
+                # 마지막 날 용량이 0이면 재배치 후보에서 제외
+                if daily_capacity[day]['spots'] == 0 and daily_capacity[day]['restaurants'] == 0:
+                    continue
+                    
                 found_accom = None
                 day_num = int(day.replace('Day', ''))
-                
-                # 현재 날짜부터 1일차까지 거슬러 올라가며 가장 최근 숙소 찾기
                 for i in range(day_num, 0, -1):
                     key = f"Day{i}"
                     accom = req.accommodations.get(key)
                     if accom and accom.name:
                         found_accom = accom
                         break
-                
                 if found_accom:
                     anchor_points_rebalance[day] = np.array([[found_accom.lat, found_accom.lng]])
 
@@ -195,11 +203,9 @@ def optimize_route(req: OptimizeRequest):
                     item = waiting_list_q.popleft()
                     item_coord = np.array([[item.lat, item.lng]])
                     day_distances = {day: euclidean_distances(item_coord, accom_coord)[0][0] for day, accom_coord in anchor_points_rebalance.items()}
-                    
                     if not day_distances:
                         waiting_list.append(item)
                         continue
-
                     sorted_empty_days = sorted(day_distances.keys(), key=lambda d: day_distances[d])
                     placed = False
                     for closest_day in sorted_empty_days:
@@ -213,7 +219,6 @@ def optimize_route(req: OptimizeRequest):
                     if not placed:
                         waiting_list.append(item)
 
-        # 3. 최종 가이드 생성
         if waiting_list:
             logger.info(f"ℹ️ 최종적으로 포함되지 못한 장소 {len(waiting_list)}개에 대한 가이드 생성")
             
@@ -223,7 +228,7 @@ def optimize_route(req: OptimizeRequest):
                 if items_without_end:
                     coords_in_day = np.array([[d.lat, d.lng] for d in all_valid_destinations if d.name in items_without_end])
                     if coords_in_day.size > 0:
-                         final_day_anchors[day] = coords_in_day
+                        final_day_anchors[day] = coords_in_day
 
             if final_day_anchors:
                 for item in waiting_list:
@@ -233,11 +238,12 @@ def optimize_route(req: OptimizeRequest):
                         for day, coords_in_day in final_day_anchors.items()
                     }
                     sorted_days = sorted(avg_distances.keys(), key=lambda d: avg_distances[d])
-                    suggestions = sorted_days[:2] if len(sorted_days) > 1 else sorted_days
+                    suggestions = sorted_days[:1]
                     unplaced_suggestions.append(Suggestion(name=item.name, type=item.type, suggestions=[d.replace('Day', '일차') for d in suggestions]))
         
-        # 4. 최종 경로 계산
-        final_day_plan[f"Day{num_days}"].append(req.end.name)
+        # 3. 최종 도착지를 마지막 날 일정에 추가
+        if req.end.name not in final_day_plan[f"Day{num_days}"]:
+            final_day_plan[f"Day{num_days}"].append(req.end.name)
         
         coord_map = {d.name: (d.lat, d.lng) for d in all_valid_destinations}
         coord_map[req.start.name] = (req.start.lat, req.start.lng)
