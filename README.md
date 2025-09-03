@@ -104,6 +104,8 @@ KOREA-TRIP-TSP/
     │   ├── components/           # (PlaceSearch.jsx, SinglePlaceSearch.jsx 등)
     │   ├── App.jsx               # 메인 애플리케이션 컴포넌트 (UI 및 상태 관리)
     │   └── main.jsx              # React 앱 진입점
+	│   └── PlaceSearch.jsx       # kakao api 이용 경유지 검색
+	│   └── SinglePlaceSearch.jsx # kakao api 이용 숙소 검색
     ├── .env                      # API 키 등 환경 변수 관리
     ├── index.css                 # Tailwind CSS 설정
     └── package.json              # JavaScript 의존성 목록
