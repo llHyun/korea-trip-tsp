@@ -1,22 +1,23 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import PlaceSearch from './PlaceSearch';
-import SinglePlaceSearch from './SinglePlaceSearch'; // 추가
+import SinglePlaceSearch from './SinglePlaceSearch';
 
-
+// ==========================================
+// 🗺️ 카카오맵 렌더링 컴포넌트
+// ==========================================
 const KakaoMap = ({ result, allPlacesCoords, selectedDay }) => {
     const mapContainer = useRef(null);
 
     useEffect(() => {
-        if (!result || !window.kakao || !window.kakao.maps) {
-            return;
-        }
+        if (!result || !window.kakao || !window.kakao.maps) return;
 
         const kakao = window.kakao;
 
         kakao.maps.load(() => {
             if (!mapContainer.current) return;
 
+            // 선택된 날짜의 동선 데이터만 필터링
             const daysToDisplay = result.days.filter(day => selectedDay === 'all' || day.date === selectedDay);
             const allPathPoints = daysToDisplay.flatMap(day => day.route.map(p => allPlacesCoords[p.name]).filter(Boolean));
             
@@ -25,6 +26,7 @@ const KakaoMap = ({ result, allPlacesCoords, selectedDay }) => {
                 return;
             };
 
+            // 동선에 맞춰 지도의 중심축 및 줌 레벨 자동 조정
             const bounds = new kakao.maps.LatLngBounds();
             allPathPoints.forEach(p => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
             
@@ -32,6 +34,7 @@ const KakaoMap = ({ result, allPlacesCoords, selectedDay }) => {
             const mapOptions = { center: initialCenter, level: 7 };
             const map = new kakao.maps.Map(mapContainer.current, mapOptions);
 
+            // 일자별 동선 구분을 위한 컬러 팔레트
             const lineColors = ['#FF5733', '#335BFF', '#33FF57', '#FF33A1', '#A133FF', '#33FFF6', '#F6FF33'];
 
             daysToDisplay.forEach((day) => {
@@ -41,11 +44,13 @@ const KakaoMap = ({ result, allPlacesCoords, selectedDay }) => {
                     .filter(Boolean)
                     .map(coords => new kakao.maps.LatLng(coords.lat, coords.lng));
 
+                // 2개 이상의 지점이 있을 경우 경로 선(Polyline) 그리기
                 if (path.length > 1) {
                     const polyline = new kakao.maps.Polyline({ path, strokeWeight: 5, strokeColor: lineColors[dayIndex % lineColors.length], strokeOpacity: 0.8, strokeStyle: 'solid' });
                     polyline.setMap(map);
                 }
 
+                // 각 지점 마커(Marker) 및 인포윈도우(InfoWindow) 렌더링
                 day.route.forEach((p, placeIndex) => {
                     const coords = allPlacesCoords[p.name];
                     if(coords) {
@@ -65,8 +70,11 @@ const KakaoMap = ({ result, allPlacesCoords, selectedDay }) => {
     return <div ref={mapContainer} className="w-full h-full rounded-lg shadow-md border" />;
 };
 
-
+// ==========================================
+// 📱 메인 App 컴포넌트
+// ==========================================
 function App() {
+    // --- 상태 관리 (State) ---
     const [startPlace, setStartPlace] = useState(null);
     const [endPlace, setEndPlace] = useState(null);
     const [days, setDays] = useState(1);
@@ -75,14 +83,13 @@ function App() {
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [isSameAccommodation, setIsSameAccommodation] = useState(false);
-    const [poiType, setPoiType] = useState('관광지');
-    const [maxSpotsPerDay, setMaxSpotsPerDay] = useState(3);
-    const [maxRestaurantsPerDay, setMaxRestaurantsPerDay] = useState(2);
-    const [includeLastDay, setIncludeLastDay] = useState(true);
     
+    // 로직 옵션 상태
+    const [isSameAccommodation, setIsSameAccommodation] = useState(false);
+    const [includeLastDay, setIncludeLastDay] = useState(true);
     const [selectedDay, setSelectedDay] = useState('all');
 
+    // 입력된 모든 장소의 좌표를 매핑하여 지도 렌더링 시 참조 (최적화)
     const allPlacesCoords = useMemo(() => {
         const coords = {};
         if (startPlace) coords[startPlace.name] = { lat: startPlace.lat, lng: startPlace.lng };
@@ -94,6 +101,7 @@ function App() {
         return coords;
     }, [startPlace, endPlace, pois, accommodations]);
 
+    // --- 핸들러 함수 ---
     const handleRemovePoi = (index) => {
         setPois(pois.filter((_, i) => i !== index));
     };
@@ -114,7 +122,7 @@ function App() {
 
     const handlePlaceSelect = (place) => {
         if (!pois.some(p => p.name === place.name)) {
-            setPois([...pois, { ...place, type: poiType }]);
+            setPois([...pois, { ...place, type: '목적지' }]); // 백엔드 모델 호환을 위해 일괄 목적지로 타입 지정
         }
     };
 
@@ -124,6 +132,7 @@ function App() {
         setAccommodations(updated);
     };
 
+    // --- API 요청 및 최적화 실행 ---
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!startPlace || !endPlace) {
@@ -133,15 +142,18 @@ function App() {
         setError(null);
         setResult(null);
         setIsLoading(true);
+        
         try {
+            // '전체 일정 동일 숙소' 체크 시, 1일차 숙소 데이터로 전체 배열 덮어쓰기
             let finalAccommodations = accommodations;
             if (isSameAccommodation) {
                 const firstDayAccom = accommodations[0];
                 finalAccommodations = accommodations.map(() => firstDayAccom);
             }
+            
             const payload = {
-                start: { ...startPlace, type: '관광지' },
-                end: { ...endPlace, type: '관광지' },
+                start: { ...startPlace, type: '목적지' },
+                end: { ...endPlace, type: '목적지' },
                 days,
                 destinations: pois,
                 accommodations: Object.fromEntries(
@@ -150,10 +162,10 @@ function App() {
                         { name: a.name, lat: a.lat, lng: a.lng },
                     ])
                 ),
-                max_spots_per_day: maxSpotsPerDay,
-                max_restaurants_per_day: maxRestaurantsPerDay,
+                is_same_accommodation: isSameAccommodation,
                 include_last_day: includeLastDay,
             };
+            
             const res = await axios.post('http://localhost:8000/api/v1/optimize/', payload);
             setResult(res.data);
             setSelectedDay('all');
@@ -175,28 +187,29 @@ function App() {
         }
     };
 
+    // 장소 출력 포맷터 (출발/도착/숙소 태그 부착)
     const formatPlace = (place, day) => {
         const dayIndex = parseInt(day.replace('Day', '')) - 1;
         const acc = isSameAccommodation ? accommodations[0] : accommodations[dayIndex];
         if (acc && place === acc.name) return `${place} [숙소]`;
         if (place === startPlace?.name) return `${place} [출발지]`;
         if (place === endPlace?.name) return `${place} [도착지]`;
-        const poi = pois.find(p => p.name === place);
-        if (poi && poi.type === '식당') return `${place} [식당]`;
         return place;
     };
 
+    // --- UI 렌더링 ---
     return (
         <div className="min-h-screen bg-[#f9fafb] text-gray-800 font-sans py-10 px-4">
             <div className="max-w-7xl mx-auto flex flex-col items-center space-y-8">
                 <div className="w-full max-w-5xl">
-                    <h1 className="text-4xl font-bold text-center text-indigo-700 mb-8">대한민국 여행 경로 최적화</h1>
+                    <h1 className="text-4xl font-bold text-center text-indigo-700 mb-8">대한민국 경로 최적화</h1>
                     <form onSubmit={handleSubmit} className="space-y-6 bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
                         <SinglePlaceSearch label="출발지" onSelect={setStartPlace} />
-                        <SinglePlaceSearch label="도착지 (여행 마지막 목적지)" onSelect={setEndPlace} />
-                        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                        <SinglePlaceSearch label="도착지 (최종 목적지)" onSelect={setEndPlace} />
+                        
+                        <div className="grid md:grid-cols-2 gap-4 items-end">
                             <div>
-                                <label className="block font-medium mb-1">여행 기간</label>
+                                <label className="block font-medium mb-1">여행/이동 기간</label>
                                 <select value={days} onChange={handleDaysChange} className="p-2 border border-gray-300 rounded w-full">
                                     {[...Array(7)].map((_, i) => (
                                         <option key={i + 1} value={i + 1}>{i + 1}박 {i + 2}일</option>
@@ -204,19 +217,7 @@ function App() {
                                 </select>
                             </div>
                             <div>
-                                <label className="block font-medium mb-1">하루 최대 관광지</label>
-                                <select value={maxSpotsPerDay} onChange={(e) => setMaxSpotsPerDay(parseInt(e.target.value))} className="p-2 border border-gray-300 rounded w-full">
-                                    {[...Array(5)].map((_, i) => (<option key={i + 1} value={i + 1}>{i + 1}개</option>))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block font-medium mb-1">하루 최대 식당</label>
-                                <select value={maxRestaurantsPerDay} onChange={(e) => setMaxRestaurantsPerDay(parseInt(e.target.value))} className="p-2 border border-gray-300 rounded w-full">
-                                    {[...Array(3)].map((_, i) => (<option key={i + 1} value={i + 1}>{i + 1}개</option>))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block font-medium mb-1">마지막 날</label>
+                                <label className="block font-medium mb-1">마지막 날 일정 포함 여부</label>
                                 <div className="flex items-center h-[42px]">
                                     <button
                                         type="button"
@@ -225,48 +226,54 @@ function App() {
                                     >
                                         <span className={`${includeLastDay ? 'translate-x-5' : 'translate-x-0'} inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out`}/>
                                     </button>
-                                    <span className="ml-3 text-sm text-gray-700">{includeLastDay ? '일정 포함' : '포함 안함'}</span>
+                                    <span className="ml-3 text-sm text-gray-700">{includeLastDay ? '일정에 목적지 포함' : '숙소/출발지에서 바로 도착지로 이동'}</span>
                                 </div>
                             </div>
                         </div>
+                        
                         <div className="bg-gray-50 p-4 rounded border border-gray-200">
-                            <label className="block font-medium mb-2">경유지 목록</label>
-                            <div className="my-3 flex items-center space-x-4">
-                                <span className="font-medium text-sm text-gray-600">유형 선택:</span>
-                                <label className="flex items-center space-x-2 cursor-pointer"><input type="radio" name="poiType" value="관광지" checked={poiType === '관광지'} onChange={(e) => setPoiType(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/><span className="text-sm">관광지</span></label>
-                                <label className="flex items-center space-x-2 cursor-pointer"><input type="radio" name="poiType" value="식당" checked={poiType === '식당'} onChange={(e) => setPoiType(e.target.value)} className="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"/><span className="text-sm">식당</span></label>
-                            </div>
+                            <label className="block font-medium mb-2">경유지(목적지) 목록</label>
                             <PlaceSearch onPlaceSelect={handlePlaceSelect} />
                             <ul className="mt-4 space-y-3">
                                 {pois.map((p, i) => (
                                     <li key={i} className="flex justify-between items-center bg-white p-3 rounded-md border shadow-sm">
-                                        <div className="flex items-center">
-                                            <span className="font-medium text-gray-800">{p.name}</span>
-                                            <span className={`ml-3 text-xs font-semibold px-2.5 py-1 rounded-full ${p.type === '식당' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'}`}>{p.type}</span>
-                                        </div>
+                                        <span className="font-medium text-gray-800">{p.name}</span>
                                         <button type="button" onClick={() => handleRemovePoi(i)} className="text-red-500 hover:text-red-700 font-medium">삭제</button>
                                     </li>
                                 ))}
                             </ul>
                         </div>
+
                         <div>
                             <div className="mb-4">
-                                <label className="flex items-center space-x-2 cursor-pointer"><input type="checkbox" checked={isSameAccommodation} onChange={(e) => setIsSameAccommodation(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"/><span className="text-gray-700 font-medium">전체 일정 동일 숙소 사용</span></label>
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input type="checkbox" checked={isSameAccommodation} onChange={(e) => setIsSameAccommodation(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"/>
+                                    <span className="text-gray-700 font-medium">전체 일정 동일 숙소(연박) 사용</span>
+                                </label>
                             </div>
                             <div className="grid md:grid-cols-3 gap-4">
                                 {accommodations.map((a, i) => (
                                     (isSameAccommodation && i > 0) ? null :
-                                    <div key={i} className="bg-white border border-gray-200 p-4 rounded"><h2 className="font-semibold mb-2 text-indigo-600">🏨 {isSameAccommodation ? '전체 숙소' : `${i + 1}일차 숙소`}</h2><SinglePlaceSearch label={`숙소`} onSelect={(place) => handleAccommodationSelect(i, place)} /></div>
+                                    <div key={i} className="bg-white border border-gray-200 p-4 rounded">
+                                        <h2 className="font-semibold mb-2 text-indigo-600">🏨 {isSameAccommodation ? '전체 숙소' : `${i + 1}일차 숙소`}</h2>
+                                        <SinglePlaceSearch label={`숙소`} onSelect={(place) => handleAccommodationSelect(i, place)} />
+                                    </div>
                                 ))}
                             </div>
                         </div>
-                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg text-base font-semibold hover:bg-indigo-700 transition">{isLoading ? '경로 최적화 중...' : '경로 최적화 시작하기'}</button>
+                        <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg text-base font-semibold hover:bg-indigo-700 transition">
+                            {isLoading ? '경로 최적화 중...' : '최적 경로 계산하기'}
+                        </button>
                     </form>
                 </div>
 
                 {isLoading && (
-                    <div className="text-center p-8"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div><p className="mt-4 text-gray-600">최적의 경로를 계산 중입니다...</p></div>
+                    <div className="text-center p-8">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+                        <p className="mt-4 text-gray-600">AI가 최적의 동선을 계산하고 있습니다...</p>
+                    </div>
                 )}
+                
                 {error && <div className="max-w-5xl w-full mx-auto text-red-600 font-semibold bg-red-100 p-4 rounded-md">❌ {error}</div>}
 
                 {result && (
@@ -284,33 +291,21 @@ function App() {
                                     </button>
                                 ))}
                             </div>
-
-                            {result.unplaced_suggestions && result.unplaced_suggestions.length > 0 && (
-                                <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r-lg">
-                                    <h3 className="font-bold text-yellow-800">💡 아쉽게 일정에 포함되지 못한 장소</h3>
-                                    <p className="text-sm text-yellow-700 mt-1">설정하신 일일 최대 방문 개수에 따라 아래 장소들은 경로에 포함되지 않았습니다.<br/>여행 중 계획을 변경하고 싶을 때 참고해 보세요!</p>
-                                    <ul className="mt-3 list-disc list-inside space-y-1 text-sm text-gray-800">
-                                        {result.unplaced_suggestions.map((s, idx) => (
-                                            <li key={idx}><strong>{s.name}</strong> ({s.type})<span className="text-gray-600"> ➡️ {s.suggestions.join(' 또는 ')} 경로와 가깝습니다.</span></li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
                             
                             {result.days
                                 .filter(day => selectedDay === 'all' || day.date === selectedDay)
                                 .map((r, i) => (
-                                <div key={i} className="bg-white border border-gray-200 p-4 rounded">
-                                    <h3 className="text-lg font-semibold mb-2 text-gray-800">{r.date}</h3>
+                                <div key={i} className="bg-white border border-gray-200 p-4 rounded shadow-sm">
+                                    <h3 className="text-lg font-semibold mb-3 text-gray-800 border-b pb-2">{r.date.replace('Day', 'Day ')}</h3>
                                     {r.route && r.route.length > 1 ? (
-                                        <ol className="list-decimal list-inside space-y-1 text-sm text-gray-700">
+                                        <ol className="list-decimal list-inside space-y-2 text-base text-gray-700 font-medium">
                                             {r.route.map((place, idx) => (<li key={idx}>{formatPlace(place?.name || '이름없음', r.date)}</li>))}
                                         </ol>
-                                    ) : (<p className="text-sm text-gray-500">자유시간 또는 이동일입니다.</p>)}
+                                    ) : (<p className="text-sm text-gray-500">배정된 목적지가 없습니다.</p>)}
                                 </div>
                             ))}
                         </div>
-                        <div className="h-[600px]">
+                        <div className="h-[600px] sticky top-4">
                             <KakaoMap result={result} allPlacesCoords={allPlacesCoords} selectedDay={selectedDay} />
                         </div>
                     </div>
@@ -321,4 +316,3 @@ function App() {
 }
 
 export default App;
-
